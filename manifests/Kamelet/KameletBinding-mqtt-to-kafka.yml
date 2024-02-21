@@ -1,0 +1,24 @@
+apiVersion: camel.apache.org/v1alpha1
+kind: KameletBinding
+metadata:
+  name: mqtt-source-binding
+spec:
+  source:
+    ref:
+      kind: Kamelet
+      apiVersion: camel.apache.org/v1alpha1
+      name: mqtt-source
+    properties:
+      brokerUrl: tcp://mqtt-mqtt-0-svc.gas-station-infra.svc.cluster.local:1883
+      topic: sensors/gas-station-factory-1/#
+  sink:
+    ref:
+      kind: Kamelet
+      apiVersion: camel.apache.org/v1alpha1
+      name: kafka-sink-scram
+    properties:
+      bootstrapServers: my-cluster-kafka-bootstrap.gas-station-infra.svc.cluster.local:9092
+      topic: sensors-gas-station-factory-1
+      user: username
+      password: password
+      securityProtocol: SASL_PLAINTEXT

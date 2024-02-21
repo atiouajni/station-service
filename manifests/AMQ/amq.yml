@@ -1,0 +1,18 @@
+apiVersion: broker.amq.io/v1beta1
+kind: ActiveMQArtemis
+metadata:
+  name: mqtt
+spec:
+  acceptors:
+  - connectionsAllowed: 5
+    expose: true
+    name: mqtt
+    port: 1883
+    protocols: mqtt
+    sslEnabled: false
+  console:
+    expose: true
+  deploymentPlan:
+    enableMetricsPlugin: true
+  console:
+    expose: true

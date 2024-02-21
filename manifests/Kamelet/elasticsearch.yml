@@ -1,0 +1,88 @@
+apiVersion: camel.apache.org/v1alpha1
+kind: Kamelet
+metadata:
+  name: elasticsearch-sink
+spec:
+  definition:
+    description: |-
+      This sink stores documents into ElasticSearch.
+
+      Input data must have JSON format according to the index used.
+
+      - `indexId` / `ce-indexid`: as the index ID for Elasticsearch
+
+      If the header won't be set the exchange ID will be used as index.
+
+      - `indexName` / `ce-indexname`: as the index Name for Elasticsearch
+
+      If the header won't be set the exchange ID will be used as index name.
+    properties:
+      clusterName:
+        description: Name of the cluster.
+        example: quickstart
+        title: ElasticSearch Cluster Name
+        type: string
+      enableSSL:
+        default: false
+        description: Do we want to connect using SSL?
+        title: Enable SSL
+        type: boolean
+        x-descriptors:
+          - 'urn:alm:descriptor:com.tectonic.ui:checkbox'
+      hostAddresses:
+        description: >-
+          Comma separated list with ip:port formatted remote transport addresses
+          to use.
+        example: 'quickstart-es-http:9200'
+        title: Host Addresses
+        type: string
+      indexName:
+        description: The name of the index to act against.
+        example: data
+        title: Index in ElasticSearch
+        type: string
+      password:
+        description: Password to connect to ElasticSearch.
+        format: password
+        title: Password
+        type: string
+        x-descriptors:
+          - 'urn:alm:descriptor:com.tectonic.ui:password'
+          - 'urn:camel:group:credentials'
+      user:
+        description: Username to connect to ElasticSearch.
+        title: Username
+        type: string
+        x-descriptors:
+          - 'urn:camel:group:credentials'
+    required:
+      - clusterName
+      - hostAddresses
+    title: ElasticSearch Index Sink
+    type: object
+  dependencies:
+    - 'camel:core'
+    - 'camel:jackson'
+    - 'camel:kamelet'
+    - 'camel:elasticsearch-rest'
+    - 'camel:gson'
+    - 'camel:bean'
+  template:
+    beans:
+      - name: local-es
+        properties:
+          password: '{{?password}}'
+          user: '{{?user}}'
+        type: '#class:org.apache.camel.component.elasticsearch.ElasticsearchComponent'
+    from:
+      steps:
+        - to:
+            parameters:
+              enableSSL: '{{enableSSL}}'
+              hostAddresses: '{{hostAddresses}}'
+              indexName: '{{?indexName}}'
+              operation: INDEX
+            uri: '{{local-es}}:{{clusterName}}'
+        - marshal:
+            json: {}
+      uri: 'kamelet:source'

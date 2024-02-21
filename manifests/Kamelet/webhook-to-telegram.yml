@@ -1,0 +1,24 @@
+#https://api.telegram.org/bot6712538106:AAGTT4uMgVncFVJs31SNMi3NsmUyxJIRLxE/getUpdates
+#curl -d "param1=value1&param2=value2" -X POST http://webhook-to-telegram-gas-station-factory.apps.sno4.anissetiouajni.com/12345
+apiVersion: camel.apache.org/v1
+kind: Pipe
+metadata:
+  name: webhook-to-telegram
+  labels:
+    app: camel-k
+spec:
+  sink:
+    properties:
+      authorizationToken: '6712538106:AAGTT4uMgVncFVJs31SNMi3NsmUyxJIRLxE'
+      chatId: 528670874
+    ref:
+      apiVersion: camel.apache.org/v1
+      kind: Kamelet
+      name: telegram-sink
+  source:
+    properties:
+      subpath: 12345
+    ref:
+      apiVersion: camel.apache.org/v1
+      kind: Kamelet
+      name: webhook-source

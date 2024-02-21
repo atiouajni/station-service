@@ -1,0 +1,28 @@
+apiVersion: camel.apache.org/v1alpha1
+kind: KameletBinding
+metadata:
+  name: kafka-to-elasticsearch-kameletbinding
+spec:
+  source:
+    ref:
+      kind: Kamelet
+      apiVersion: camel.apache.org/v1alpha1
+      name: kafka-scram-source
+    properties:
+      bootstrapServers: my-cluster-kafka-bootstrap.gas-station-infra.svc.cluster.local:9092
+      topic: sensors-gas-station-factory-1
+      securityProtocol: SASL_PLAINTEXT
+      user: username
+      password: password
+  sink:
+    ref:
+      kind: Kamelet
+      apiVersion: camel.apache.org/v1alpha1
+      name: elasticsearch-index-sink
+    properties:
+      clusterName: elasticsearch
+      hostAddresses: elasticsearch.gas-station-infra.svc.cluster.local:9200
+      indexName: sensors-gas-station-factory-1
+      enableSSL: false
+      user: elastic
+      password: elastic

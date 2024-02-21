@@ -1,0 +1,569 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus-server
+  labels:
+    app: gas-station-infra
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "nodes/proxy", "services", "endpoints", "pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups:
+      - extensions
+    resources:
+      - ingresses
+    verbs: ["get", "list", "watch"]
+  - nonResourceURLs: ["/metrics"]
+    verbs: ["get"]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus-server
+  labels:
+    app: gas-station-infra
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus-server
+  labels:
+    app: gas-station-infra
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus-server
+subjects:
+  - kind: ServiceAccount
+    name: prometheus-server
+    namespace: gas-station-infra
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus-server
+spec:
+  serviceAccount: rometheus-server
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gas-station-infra
+  template:
+    metadata:
+      labels:
+        app: gas-station-infra
+    spec:
+      containers:
+        - name: prometheus
+          image: prom/prometheus
+          ports:
+            - containerPort: 9090
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/prometheus
+      volumes:
+        - name: config-volume
+          secret:
+            secretName: additional-scrape-configs
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: additional-scrape-configs
+type: Opaque
+stringData:
+  prometheus.yml: |
+    global:
+      scrape_interval: 30s
+      scrape_timeout: 10s
+      scrape_protocols:
+      - OpenMetricsText1.0.0
+      - OpenMetricsText0.0.1
+      - PrometheusText0.0.4
+      evaluation_interval: 30s
+      external_labels:
+        prometheus: gas-station-infra/prometheus
+        prometheus_replica: prometheus-prometheus-0
+    alerting:
+      alert_relabel_configs:
+      - separator: ;
+        regex: prometheus_replica
+        replacement: $1
+        action: labeldrop
+      alertmanagers:
+      - follow_redirects: true
+        enable_http2: true
+        scheme: http
+        path_prefix: /
+        timeout: 10s
+        api_version: v2
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_service_name]
+          separator: ;
+          regex: alertmanager
+          replacement: $1
+          action: keep
+        - source_labels: [__meta_kubernetes_endpoint_port_name]
+          separator: ;
+          regex: alertmanager
+          replacement: $1
+          action: keep
+        kubernetes_sd_configs:
+        - role: endpoints
+          kubeconfig_file: ""
+          follow_redirects: true
+          enable_http2: true
+          namespaces:
+            own_namespace: false
+            names:
+            - gas-station-infra
+    rule_files:
+    - /etc/prometheus/rules/prometheus-prometheus-rulefiles-0/*.yaml
+    scrape_configs:
+    - job_name: kubernetes-cadvisor
+      honor_labels: true
+      scrape_interval: 10s
+      scrape_timeout: 10s
+      metrics_path: /metrics/cadvisor
+      scheme: https
+      kubernetes_sd_configs:
+      - role: node
+        namespaces:
+          names: []
+      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      tls_config:
+        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        insecure_skip_verify: true
+      relabel_configs:
+      - separator: ;
+        regex: __meta_kubernetes_node_label_(.+)
+        replacement: $1
+        action: labelmap
+      - separator: ;
+        regex: (.*)
+        target_label: __address__
+        replacement: kubernetes.default.svc:443
+        action: replace
+      - source_labels: [__meta_kubernetes_node_name]
+        separator: ;
+        regex: (.+)
+        target_label: __metrics_path__
+        replacement: /api/v1/nodes/${1}/proxy/metrics/cadvisor
+        action: replace
+      - source_labels: [__meta_kubernetes_node_name]
+        separator: ;
+        regex: (.*)
+        target_label: node_name
+        replacement: $1
+        action: replace
+      - source_labels: [__meta_kubernetes_node_address_InternalIP]
+        separator: ;
+        regex: (.*)
+        target_label: node_ip
+        replacement: $1
+        action: replace
+      metric_relabel_configs:
+      - source_labels: [container, __name__]
+        separator: ;
+        regex: POD;container_(network).*
+        target_label: container
+        replacement: $1
+        action: replace
+      - source_labels: [container]
+        separator: ;
+        regex: POD
+        replacement: $1
+        action: drop
+      - source_labels: [container]
+        separator: ;
+        regex: ^$
+        replacement: $1
+        action: drop
+      - source_labels: [__name__]
+        separator: ;
+        regex: container_(network_tcp_usage_total|tasks_state|memory_failures_total|network_udp_usage_total)
+        replacement: $1
+        action: drop
+
+    - job_name: kubernetes-nodes-kubelet
+      scrape_interval: 10s
+      scrape_timeout: 10s
+      scheme: https
+      kubernetes_sd_configs:
+      - role: node
+        namespaces:
+          names: []
+      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      tls_config:
+        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        insecure_skip_verify: true
+      relabel_configs:
+      - action: labelmap
+        regex: __meta_kubernetes_node_label_(.+)
+      - target_label: __address__
+        replacement: kubernetes.default.svc:443
+      - source_labels: [__meta_kubernetes_node_name]
+        regex: (.+)
+        target_label: __metrics_path__
+        replacement: /api/v1/nodes/${1}/proxy/metrics
+    - job_name: podMonitor/gas-station-infra/bridge-metrics/0
+      honor_timestamps: true
+      track_timestamps_staleness: false
+      scrape_interval: 30s
+      scrape_timeout: 10s
+      scrape_protocols:
+      - OpenMetricsText1.0.0
+      - OpenMetricsText0.0.1
+      - PrometheusText0.0.4
+      metrics_path: /metrics
+      scheme: http
+      enable_compression: true
+      follow_redirects: true
+      enable_http2: true
+      relabel_configs:
+      - source_labels: [job]
+        separator: ;
+        regex: (.*)
+        target_label: __tmp_prometheus_job_name
+        replacement: $1
+        action: replace
+      - source_labels: [__meta_kubernetes_pod_label_strimzi_io_kind, __meta_kubernetes_pod_labelpresent_strimzi_io_kind]
+        separator: ;
+        regex: (KafkaBridge);true
+        replacement: $1
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_container_port_name]
+        separator: ;
+        regex: rest-api
+        replacement: $1
+        action: keep
+      - source_labels: [__meta_kubernetes_namespace]
+        separator: ;
+        regex: (.*)
+        target_label: namespace
+        replacement: $1
+        action: replace
+      - source_labels: [__meta_kubernetes_pod_container_name]
+        separator: ;
+        regex: (.*)
+        target_label: container
+        replacement: $1
+        action: replace
+      - source_labels: [__meta_kubernetes_pod_name]
+        separator: ;
+        regex: (.*)
+        target_label: pod
+        replacement: $1
+        action: replace
+      - separator: ;
+        regex: (.*)
+        target_label: job
+        replacement: gas-station-infra/bridge-metrics
+        action: replace
+      - separator: ;
+        regex: (.*)
+        target_label: endpoint
+        replacement: rest-api
+        action: replace
+      - source_labels: [__address__]
+        separator: ;
+        regex: (.*)
+        modulus: 1
+        target_label: __tmp_hash
+        replacement: $1
+        action: hashmod
+      - source_labels: [__tmp_hash]
+        separator: ;
+        regex: "0"
+        replacement: $1
+        action: keep
+      kubernetes_sd_configs:
+      - role: pod
+        kubeconfig_file: ""
+        follow_redirects: true
+        enable_http2: true
+        namespaces:
+          own_namespace: false
+          names:
+          - gas-station-infra
+    - job_name: podMonitor/gas-station-infra/cluster-operator-metrics/0
+      honor_timestamps: true
+      track_timestamps_staleness: false
+      scrape_interval: 30s
+      scrape_timeout: 10s
+      scrape_protocols:
+      - OpenMetricsText1.0.0
+      - OpenMetricsText0.0.1
+      - PrometheusText0.0.4
+      metrics_path: /metrics
+      scheme: http
+      enable_compression: true
+      follow_redirects: true
+      enable_http2: true
+      relabel_configs:
+      - source_labels: [job]
+        separator: ;
+        regex: (.*)
+        target_label: __tmp_prometheus_job_name
+        replacement: $1
+        action: replace
+      - source_labels: [__meta_kubernetes_pod_label_strimzi_io_kind, __meta_kubernetes_pod_labelpresent_strimzi_io_kind]
+        separator: ;
+        regex: (cluster-operator);true
+        replacement: $1
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_container_port_name]
+        separator: ;
+        regex: http
+        replacement: $1
+        action: keep
+      - source_labels: [__meta_kubernetes_namespace]
+        separator: ;
+        regex: (.*)
+        target_label: namespace
+        replacement: $1
+        action: replace
+      - source_labels: [__meta_kubernetes_pod_container_name]
+        separator: ;
+        regex: (.*)
+        target_label: container
+        replacement: $1
+        action: replace
+      - source_labels: [__meta_kubernetes_pod_name]
+        separator: ;
+        regex: (.*)
+        target_label: pod
+        replacement: $1
+        action: replace
+      - separator: ;
+        regex: (.*)
+        target_label: job
+        replacement: gas-station-infra/cluster-operator-metrics
+        action: replace
+      - separator: ;
+        regex: (.*)
+        target_label: endpoint
+        replacement: http
+        action: replace
+      - source_labels: [__address__]
+        separator: ;
+        regex: (.*)
+        modulus: 1
+        target_label: __tmp_hash
+        replacement: $1
+        action: hashmod
+      - source_labels: [__tmp_hash]
+        separator: ;
+        regex: "0"
+        replacement: $1
+        action: keep
+      kubernetes_sd_configs:
+      - role: pod
+        kubeconfig_file: ""
+        follow_redirects: true
+        enable_http2: true
+        namespaces:
+          own_namespace: false
+          names:
+          - gas-station-infra
+    - job_name: podMonitor/gas-station-infra/entity-operator-metrics/0
+      honor_timestamps: true
+      track_timestamps_staleness: false
+      scrape_interval: 30s
+      scrape_timeout: 10s
+      scrape_protocols:
+      - OpenMetricsText1.0.0
+      - OpenMetricsText0.0.1
+      - PrometheusText0.0.4
+      metrics_path: /metrics
+      scheme: http
+      enable_compression: true
+      follow_redirects: true
+      enable_http2: true
+      relabel_configs:
+      - source_labels: [job]
+        separator: ;
+        regex: (.*)
+        target_label: __tmp_prometheus_job_name
+        replacement: $1
+        action: replace
+      - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name, __meta_kubernetes_pod_labelpresent_app_kubernetes_io_name]
+        separator: ;
+        regex: (entity-operator);true
+        replacement: $1
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_container_port_name]
+        separator: ;
+        regex: healthcheck
+        replacement: $1
+        action: keep
+      - source_labels: [__meta_kubernetes_namespace]
+        separator: ;
+        regex: (.*)
+        target_label: namespace
+        replacement: $1
+        action: replace
+      - source_labels: [__meta_kubernetes_pod_container_name]
+        separator: ;
+        regex: (.*)
+        target_label: container
+        replacement: $1
+        action: replace
+      - source_labels: [__meta_kubernetes_pod_name]
+        separator: ;
+        regex: (.*)
+        target_label: pod
+        replacement: $1
+        action: replace
+      - separator: ;
+        regex: (.*)
+        target_label: job
+        replacement: gas-station-infra/entity-operator-metrics
+        action: replace
+      - separator: ;
+        regex: (.*)
+        target_label: endpoint
+        replacement: healthcheck
+        action: replace
+      - source_labels: [__address__]
+        separator: ;
+        regex: (.*)
+        modulus: 1
+        target_label: __tmp_hash
+        replacement: $1
+        action: hashmod
+      - source_labels: [__tmp_hash]
+        separator: ;
+        regex: "0"
+        replacement: $1
+        action: keep
+      kubernetes_sd_configs:
+      - role: pod
+        kubeconfig_file: ""
+        follow_redirects: true
+        enable_http2: true
+        namespaces:
+          own_namespace: false
+          names:
+          - gas-station-infra
+    - job_name: podMonitor/gas-station-infra/kafka-resources-metrics/0
+      honor_timestamps: true
+      track_timestamps_staleness: false
+      scrape_interval: 30s
+      scrape_timeout: 10s
+      scrape_protocols:
+      - OpenMetricsText1.0.0
+      - OpenMetricsText0.0.1
+      - PrometheusText0.0.4
+      metrics_path: /metrics
+      scheme: http
+      enable_compression: true
+      follow_redirects: true
+      enable_http2: true
+      relabel_configs:
+      - source_labels: [job]
+        separator: ;
+        regex: (.*)
+        target_label: __tmp_prometheus_job_name
+        replacement: $1
+        action: replace
+      - source_labels: [__meta_kubernetes_pod_label_strimzi_io_kind, __meta_kubernetes_pod_labelpresent_strimzi_io_kind]
+        separator: ;
+        regex: (Kafka|KafkaConnect|KafkaConnectS2I|KafkaMirrorMaker|KafkaMirrorMaker2);true
+        replacement: $1
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_container_port_name]
+        separator: ;
+        regex: tcp-prometheus
+        replacement: $1
+        action: keep
+      - source_labels: [__meta_kubernetes_namespace]
+        separator: ;
+        regex: (.*)
+        target_label: namespace
+        replacement: $1
+        action: replace
+      - source_labels: [__meta_kubernetes_pod_container_name]
+        separator: ;
+        regex: (.*)
+        target_label: container
+        replacement: $1
+        action: replace
+      - source_labels: [__meta_kubernetes_pod_name]
+        separator: ;
+        regex: (.*)
+        target_label: pod
+        replacement: $1
+        action: replace
+      - separator: ;
+        regex: (.*)
+        target_label: job
+        replacement: gas-station-infra/kafka-resources-metrics
+        action: replace
+      - separator: ;
+        regex: (.*)
+        target_label: endpoint
+        replacement: tcp-prometheus
+        action: replace
+      - separator: ;
+        regex: __meta_kubernetes_pod_label_(strimzi_io_.+)
+        replacement: $1
+        action: labelmap
+      - source_labels: [__meta_kubernetes_namespace]
+        separator: ;
+        regex: (.*)
+        target_label: namespace
+        replacement: $1
+        action: replace
+      - source_labels: [__meta_kubernetes_pod_name]
+        separator: ;
+        regex: (.*)
+        target_label: kubernetes_pod_name
+        replacement: $1
+        action: replace
+      - source_labels: [__meta_kubernetes_pod_node_name]
+        separator: ;
+        regex: (.*)
+        target_label: node_name
+        replacement: $1
+        action: replace
+      - source_labels: [__meta_kubernetes_pod_host_ip]
+        separator: ;
+        regex: (.*)
+        target_label: node_ip
+        replacement: $1
+        action: replace
+      - source_labels: [__address__]
+        separator: ;
+        regex: (.*)
+        modulus: 1
+        target_label: __tmp_hash
+        replacement: $1
+        action: hashmod
+      - source_labels: [__tmp_hash]
+        separator: ;
+        regex: "0"
+        replacement: $1
+        action: keep
+      kubernetes_sd_configs:
+      - role: pod
+        kubeconfig_file: ""
+        follow_redirects: true
+        enable_http2: true
+        namespaces:
+          own_namespace: false
+          names:
+          - gas-station-infra
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+spec:
+  selector:
+    app: gas-station-infra
+  ports:
+    - protocol: TCP
+      port: 9090
+      targetPort: 9090
+---
